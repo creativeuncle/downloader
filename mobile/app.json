@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "VidSnatch",
+    "slug": "vidsnatch",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "vidsnatch",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.vidsnatch.app"
+    },
+    "android": {
+      "package": "com.vidsnatch.app",
+      "permissions": ["INTERNET"],
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "apiBaseUrl": "https://YOUR-BACKEND-URL.example.com"
+    }
+  }
+}
