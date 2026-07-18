@@ -55,6 +55,12 @@ const SOURCE_COOKIES_FILE = process.env.COOKIES_FILE || path.join(__dirname, 'co
 const WRITABLE_COOKIES_FILE = path.join(TEMP_DIR, 'cookies.txt');
 if (fs.existsSync(SOURCE_COOKIES_FILE)) {
   fs.copyFileSync(SOURCE_COOKIES_FILE, WRITABLE_COOKIES_FILE);
+  const stat = fs.statSync(WRITABLE_COOKIES_FILE);
+  const cookieCount = fs.readFileSync(WRITABLE_COOKIES_FILE, 'utf8')
+    .split('\n').filter(l => l && !l.startsWith('#')).length;
+  console.log(`[Cookies] Loaded ${SOURCE_COOKIES_FILE} -> ${WRITABLE_COOKIES_FILE} (${stat.size} bytes, ${cookieCount} cookie lines)`);
+} else {
+  console.log(`[Cookies] No cookies file found at ${SOURCE_COOKIES_FILE} — running without cookies`);
 }
 function cookieArgs() {
   return fs.existsSync(WRITABLE_COOKIES_FILE) ? ['--cookies', WRITABLE_COOKIES_FILE] : [];
