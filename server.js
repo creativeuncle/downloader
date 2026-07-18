@@ -46,6 +46,14 @@ function isValidUrl(url) {
   }
 }
 
+// Optional cookies.txt (Netscape format) for platforms that need auth/bot-check bypass
+// (YouTube "Sign in to confirm you're not a bot", Instagram private content, etc).
+// Set via Render Secret File, not committed to git.
+const COOKIES_FILE = process.env.COOKIES_FILE || path.join(__dirname, 'cookies.txt');
+function cookieArgs() {
+  return fs.existsSync(COOKIES_FILE) ? ['--cookies', COOKIES_FILE] : [];
+}
+
 // ─── INFO ROUTE ───────────────────────────────────────────────────────────────
 app.post('/api/info', (req, res) => {
   const { url } = req.body;
@@ -65,12 +73,7 @@ app.post('/api/info', (req, res) => {
     });
   }
 
-  const args = ['--dump-json', '--no-playlist', '--no-warnings'];
-
-  // Only Instagram needs browser cookies
-  if (platform === 'instagram') {
-    args.push('--cookies-from-browser', 'chrome');
-  }
+  const args = ['--dump-json', '--no-playlist', '--no-warnings', ...cookieArgs()];
 
   args.push(url);
 
@@ -202,11 +205,8 @@ app.post('/api/download', (req, res) => {
     '--merge-output-format', 'mp4',
     '--postprocessor-args', 'ffmpeg:-movflags +faststart',
     '-o', outputTemplate,
+    ...cookieArgs(),
   ];
-
-  if (platform_from_url(url) === 'instagram') {
-    args.push('--cookies-from-browser', 'chrome');
-  }
 
   if (isAudio) {
     args.push('--extract-audio', '--audio-format', 'mp3');
@@ -271,16 +271,6 @@ app.post('/api/download', (req, res) => {
     stream.on('error', () => fs.unlink(actualFile, () => {}));
   });
 });
-
-// Helper used inside download route
-function platform_from_url(url) {
-  if (url.includes('instagram.com')) return 'instagram';
-  if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
-  if (url.includes('tiktok.com')) return 'tiktok';
-  if (url.includes('snapchat.com')) return 'snapchat';
-  if (url.includes('twitter.com') || url.includes('x.com')) return 'twitter';
-  return 'unknown';
-}
 
 // Cleanup temp files older than 2 hours
 setInterval(() => {
