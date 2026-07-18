@@ -62,16 +62,21 @@ if (fs.existsSync(SOURCE_COOKIES_FILE)) {
 } else {
   console.log(`[Cookies] No cookies file found at ${SOURCE_COOKIES_FILE} — running without cookies`);
 }
-function cookieArgs() {
+// YouTube's android/tv clients don't use web cookies at all — attaching a
+// web-session cookie jar to those requests is a mismatched signal that can
+// itself trigger the bot check, so cookies are skipped for YouTube.
+function cookieArgs(platform) {
+  if (platform === 'youtube') return [];
   return fs.existsSync(WRITABLE_COOKIES_FILE) ? ['--cookies', WRITABLE_COOKIES_FILE] : [];
 }
 
-// YouTube's "web" client now requires a PO token that cookies alone don't satisfy,
-// triggering "Sign in to confirm you're not a bot" even with valid cookies. The
-// android client skips that check.
+// YouTube's "web" client requires a PO token that cookies alone don't satisfy,
+// triggering "Sign in to confirm you're not a bot". Mixing web into the client
+// list re-triggers that same failure, so use android/tv only — neither needs a
+// PO token or cookies.
 function platformArgs(platform) {
   if (platform === 'youtube') {
-    return ['--extractor-args', 'youtube:player_client=android,web'];
+    return ['--extractor-args', 'youtube:player_client=android,tv'];
   }
   return [];
 }
@@ -95,7 +100,7 @@ app.post('/api/info', (req, res) => {
     });
   }
 
-  const args = ['--dump-json', '--no-playlist', '--no-warnings', ...cookieArgs(), ...platformArgs(platform)];
+  const args = ['--dump-json', '--no-playlist', '--no-warnings', ...cookieArgs(platform), ...platformArgs(platform)];
 
   args.push(url);
 
@@ -227,7 +232,7 @@ app.post('/api/download', (req, res) => {
     '--merge-output-format', 'mp4',
     '--postprocessor-args', 'ffmpeg:-movflags +faststart',
     '-o', outputTemplate,
-    ...cookieArgs(),
+    ...cookieArgs(detectPlatform(url)),
     ...platformArgs(detectPlatform(url)),
   ];
 
