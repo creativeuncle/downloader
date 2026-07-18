@@ -48,10 +48,16 @@ function isValidUrl(url) {
 
 // Optional cookies.txt (Netscape format) for platforms that need auth/bot-check bypass
 // (YouTube "Sign in to confirm you're not a bot", Instagram private content, etc).
-// Set via Render Secret File, not committed to git.
-const COOKIES_FILE = process.env.COOKIES_FILE || path.join(__dirname, 'cookies.txt');
+// Set via Render Secret File, not committed to git. Secret Files mount read-only,
+// but yt-dlp rewrites the cookie jar after each run (refreshed session tokens), so
+// the source is copied into a writable file on boot and that copy is what's used.
+const SOURCE_COOKIES_FILE = process.env.COOKIES_FILE || path.join(__dirname, 'cookies.txt');
+const WRITABLE_COOKIES_FILE = path.join(TEMP_DIR, 'cookies.txt');
+if (fs.existsSync(SOURCE_COOKIES_FILE)) {
+  fs.copyFileSync(SOURCE_COOKIES_FILE, WRITABLE_COOKIES_FILE);
+}
 function cookieArgs() {
-  return fs.existsSync(COOKIES_FILE) ? ['--cookies', COOKIES_FILE] : [];
+  return fs.existsSync(WRITABLE_COOKIES_FILE) ? ['--cookies', WRITABLE_COOKIES_FILE] : [];
 }
 
 // ─── INFO ROUTE ───────────────────────────────────────────────────────────────
