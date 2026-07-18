@@ -96,7 +96,7 @@ export default function App() {
       <StatusBar barStyle="dark-content" />
       <View style={styles.container}>
         <Text style={styles.title}>VidSnatch</Text>
-        <Text style={styles.subtitle}>YouTube, Instagram, TikTok, Snapchat & Twitter</Text>
+        <Text style={styles.subtitle}>YouTube, Instagram, TikTok, Snapchat, Twitter & Facebook</Text>
 
         <TextInput
           style={styles.input}
