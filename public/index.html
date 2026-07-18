@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>VidSnatch — Video Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0f; --surface: #13131a; --border: #1e1e2e;
+      --yt: #FF0000; --ig: #E1306C; --tt: #69C9D0; --sc: #FFFC00; --x: #1DA1F2;
+      --accent: #7C3AED; --accent2: #a78bfa; --text: #f0f0f5; --muted: #6b6b85; --success: #10b981;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; overflow-x: hidden; }
+    body::before { content: ''; position: fixed; inset: 0; background-image: linear-gradient(rgba(124,58,237,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(124,58,237,0.03) 1px, transparent 1px); background-size: 40px 40px; pointer-events: none; z-index: 0; }
+    body::after { content: ''; position: fixed; top: -200px; left: 50%; transform: translateX(-50%); width: 600px; height: 600px; background: radial-gradient(circle, rgba(124,58,237,0.15) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+    .container { position: relative; z-index: 1; max-width: 720px; margin: 0 auto; padding: 60px 20px 80px; }
+    header { text-align: center; margin-bottom: 56px; }
+    .logo { font-family: 'Syne', sans-serif; font-size: 42px; font-weight: 800; letter-spacing: -1px; background: linear-gradient(135deg, #fff 30%, var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .logo span { background: linear-gradient(135deg, var(--accent) 0%, #ec4899 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .tagline { color: var(--muted); font-size: 15px; margin-top: 10px; }
+    .platforms { display: flex; gap: 10px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+    .badge { display: flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 100px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; border: 1px solid; }
+    .badge svg { width: 12px; height: 12px; fill: currentColor; }
+    .badge.yt  { color: var(--yt);  border-color: rgba(255,0,0,0.3);    background: rgba(255,0,0,0.06); }
+    .badge.ig  { color: var(--ig);  border-color: rgba(225,48,108,0.3); background: rgba(225,48,108,0.06); }
+    .badge.tt  { color: var(--tt);  border-color: rgba(105,201,208,0.3);background: rgba(105,201,208,0.06); }
+    .badge.sc  { color: var(--sc);  border-color: rgba(255,252,0,0.3);  background: rgba(255,252,0,0.06); }
+    .badge.x   { color: var(--x);   border-color: rgba(29,161,242,0.3); background: rgba(29,161,242,0.06); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 32px; margin-bottom: 20px; }
+    .input-group { display: flex; gap: 10px; }
+    .url-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; color: var(--text); font-size: 14px; font-family: 'Inter', sans-serif; outline: none; transition: border-color 0.2s; }
+    .url-input::placeholder { color: var(--muted); }
+    .url-input:focus { border-color: var(--accent); }
+    .fetch-btn { background: var(--accent); color: white; border: none; border-radius: 12px; padding: 14px 22px; font-size: 14px; font-weight: 600; font-family: 'Inter', sans-serif; cursor: pointer; white-space: nowrap; transition: background 0.2s, transform 0.1s; display: flex; align-items: center; gap: 8px; }
+    .fetch-btn:hover { background: #6d28d9; }
+    .fetch-btn:active { transform: scale(0.97); }
+    .fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .platform-indicator { display: none; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+    .platform-indicator.show { display: flex; }
+    .platform-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .preview { display: none; margin-top: 28px; }
+    .preview.show { display: block; }
+    .preview-inner { display: flex; gap: 16px; align-items: flex-start; }
+    .thumb { width: 140px; height: 90px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); flex-shrink: 0; background: var(--border); }
+    .preview-meta { flex: 1; min-width: 0; }
+    .video-title { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 600; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .video-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .format-section { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+    .format-label { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; }
+    .formats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+    .format-opt { display: none; }
+    .format-opt + label { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; cursor: pointer; transition: all 0.15s; user-select: none; }
+    .format-opt:checked + label { border-color: var(--accent); background: rgba(124,58,237,0.1); color: var(--accent2); }
+    .format-opt + label:hover { border-color: var(--accent); }
+    .format-icon { font-size: 15px; }
+    .download-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; margin-top: 20px; padding: 16px; background: linear-gradient(135deg, var(--accent), #9333ea); color: white; border: none; border-radius: 14px; font-size: 15px; font-weight: 600; font-family: 'Inter', sans-serif; cursor: pointer; transition: opacity 0.2s, transform 0.1s; }
+    .download-btn:hover { opacity: 0.9; }
+    .download-btn:active { transform: scale(0.98); }
+    .download-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .progress-wrap { display: none; margin-top: 16px; }
+    .progress-wrap.show { display: block; }
+    .progress-bar-bg { height: 6px; background: var(--border); border-radius: 10px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #ec4899); border-radius: 10px; transition: width 0.4s ease; }
+    .progress-text { font-size: 12px; color: var(--muted); margin-top: 8px; text-align: center; }
+    .toast { display: none; margin-top: 14px; padding: 12px 16px; border-radius: 10px; font-size: 13px; font-weight: 500; }
+    .toast.error   { display: block; background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.3);  color: #f87171; }
+    .toast.success { display: block; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: #34d399; }
+    .how { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 28px 32px; }
+    .how-title { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; margin-bottom: 20px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .steps { display: flex; flex-direction: column; gap: 16px; }
+    .step { display: flex; align-items: flex-start; gap: 14px; }
+    .step-num { width: 28px; height: 28px; border-radius: 8px; background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--accent2); flex-shrink: 0; }
+    .step-text { font-size: 14px; color: var(--muted); padding-top: 4px; line-height: 1.5; }
+    .step-text strong { color: var(--text); }
+    .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 540px) { .input-group { flex-direction: column; } .preview-inner { flex-direction: column; } .thumb { width: 100%; height: 180px; } .logo { font-size: 32px; } .card { padding: 20px; } }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="logo">Vid<span>Snatch</span></div>
+    <p class="tagline">Download videos from YouTube, Instagram, TikTok, Snapchat & Twitter</p>
+    <div class="platforms">
+      <span class="badge yt"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2C0 8.1 0 12 0 12s0 3.9.5 5.8a3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1C24 15.9 24 12 24 12s0-3.9-.5-5.8zM9.8 15.5V8.5l6.2 3.5-6.2 3.5z"/></svg>YouTube</span>
+      <span class="badge ig"><svg viewBox="0 0 24 24"><path d="M12 2.2c3.2 0 3.6 0 4.9.1 3.3.1 4.8 1.7 4.9 4.9.1 1.3.1 1.6.1 4.8 0 3.2 0 3.6-.1 4.8-.1 3.2-1.7 4.8-4.9 4.9-1.3.1-1.6.1-4.9.1-3.2 0-3.6 0-4.8-.1-3.3-.1-4.8-1.7-4.9-4.9C2.2 15.6 2.2 15.3 2.2 12c0-3.2 0-3.6.1-4.8.1-3.3 1.7-4.8 4.9-4.9 1.2-.1 1.6-.1 4.8-.1zM12 0C8.7 0 8.3 0 7.1.1 2.7.3.3 2.7.1 7.1.0 8.3 0 8.7 0 12c0 3.3 0 3.7.1 4.9.2 4.4 2.6 6.8 7 7C8.3 24 8.7 24 12 24c3.3 0 3.7 0 4.9-.1 4.4-.2 6.8-2.6 7-7 .1-1.2.1-1.6.1-4.9 0-3.3 0-3.7-.1-4.9C23.7 2.7 21.3.3 16.9.1 15.7 0 15.3 0 12 0zm0 5.8a6.2 6.2 0 1 0 0 12.4A6.2 6.2 0 0 0 12 5.8zm0 10.2a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.4-11.8a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z"/></svg>Instagram</span>
+      <span class="badge tt"><svg viewBox="0 0 24 24"><path d="M19.6 3.3A4.5 4.5 0 0 1 15.2 0h-3.4v16.4a2.7 2.7 0 0 1-2.7 2.3 2.7 2.7 0 0 1-2.7-2.7 2.7 2.7 0 0 1 2.7-2.7c.3 0 .5 0 .8.1V10a6.1 6.1 0 0 0-.8-.1 6.1 6.1 0 0 0-6.1 6.1A6.1 6.1 0 0 0 9.1 22a6.1 6.1 0 0 0 6.1-6.1V8.1a7.8 7.8 0 0 0 4.6 1.5V6.2a4.5 4.5 0 0 1-2.6-.9 4.5 4.5 0 0 1-1.4-2z"/></svg>TikTok</span>
+      <span class="badge sc"><svg viewBox="0 0 24 24"><path d="M12.166 2C9.484 2 7.05 3.11 5.353 4.913c-1.12 1.21-1.8 2.79-1.8 4.53 0 .48.042.948.12 1.405-.18.09-.38.14-.58.14-.41 0-.79-.17-1.06-.44a.5.5 0 0 0-.7.71c.46.46 1.09.73 1.76.73.18 0 .36-.02.54-.06-.28.75-.45 1.56-.45 2.41 0 .28.02.55.05.82-.32.14-.62.21-.93.21-.54 0-1.05-.2-1.44-.55a.5.5 0 0 0-.66.75c.56.5 1.3.8 2.1.8.26 0 .52-.04.77-.1.37.96 1.01 1.77 1.83 2.33-.54.13-1.09.2-1.65.2a.5.5 0 0 0 0 1c2.1 0 3.97-.88 5.3-2.3a5.97 5.97 0 0 0 3.54 1.16 5.97 5.97 0 0 0 3.54-1.16c1.33 1.42 3.2 2.3 5.3 2.3a.5.5 0 0 0 0-1c-.56 0-1.11-.07-1.65-.2.82-.56 1.46-1.37 1.83-2.33.25.06.51.1.77.1.8 0 1.54-.3 2.1-.8a.5.5 0 0 0-.66-.75c-.39.35-.9.55-1.44.55-.31 0-.61-.07-.93-.21.03-.27.05-.54.05-.82 0-.85-.17-1.66-.45-2.41.18.04.36.06.54.06.67 0 1.3-.27 1.76-.73a.5.5 0 0 0-.7-.71c-.27.27-.65.44-1.06.44-.2 0-.4-.05-.58-.14.078-.457.12-.925.12-1.405 0-1.74-.68-3.32-1.8-4.53C15.116 3.11 12.684 2 12 2z"/></svg>Snapchat</span>
+      <span class="badge x"><svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>Twitter/X</span>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="input-group">
+      <input type="url" class="url-input" id="urlInput" placeholder="Paste YouTube, Instagram, TikTok, Snapchat or Twitter link..." autocomplete="off"/>
+      <button class="fetch-btn" id="fetchBtn" onclick="fetchInfo()">
+        <span id="fetchBtnText">Fetch</span>
+        <div class="spinner" id="fetchSpinner"></div>
+      </button>
+    </div>
+
+    <div class="platform-indicator" id="platformIndicator">
+      <div class="platform-dot" id="platformDot"></div>
+      <span id="platformName"></span> detected
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="preview" id="preview">
+      <div class="preview-inner">
+        <img class="thumb" id="thumbImg" src="" alt="thumbnail"/>
+        <div class="preview-meta">
+          <div class="video-title" id="videoTitle"></div>
+          <div class="video-sub" id="videoSub"></div>
+        </div>
+      </div>
+      <div class="format-section">
+        <div class="format-label">Choose Format</div>
+        <div class="formats-grid" id="formatsGrid"></div>
+      </div>
+      <button class="download-btn" id="downloadBtn" onclick="startDownload()">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 3v13M7 12l5 5 5-5M3 19h18" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span id="dlBtnText">Download</span>
+        <div class="spinner" id="dlSpinner"></div>
+      </button>
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+        <div class="progress-text" id="progressText">Preparing...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="how">
+    <div class="how-title">How it works</div>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Paste the link</strong> — Copy any YouTube, Instagram, TikTok, Snapchat (Spotlight/Story), or Twitter/X video URL.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Select quality</strong> — Choose your preferred resolution or audio-only format.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Download</strong> — Click Download and the file saves to your device automatically.</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let videoData = null;
+  let selectedFormat = null;
+  const urlInput = document.getElementById('urlInput');
+
+  const PLATFORM_COLORS = {
+    youtube: '#FF0000', instagram: '#E1306C', tiktok: '#69C9D0',
+    snapchat: '#FFFC00', twitter: '#1DA1F2'
+  };
+  const PLATFORM_NAMES = {
+    youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok',
+    snapchat: 'Snapchat', twitter: 'Twitter/X'
+  };
+
+  function detectPlatform(url) {
+    if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
+    if (url.includes('instagram.com')) return 'instagram';
+    if (url.includes('tiktok.com')) return 'tiktok';
+    if (url.includes('snapchat.com')) return 'snapchat';
+    if (url.includes('twitter.com') || url.includes('x.com')) return 'twitter';
+    return null;
+  }
+
+  urlInput.addEventListener('input', () => {
+    const p = detectPlatform(urlInput.value.trim());
+    const indicator = document.getElementById('platformIndicator');
+    if (p) {
+      document.getElementById('platformDot').style.background = PLATFORM_COLORS[p];
+      document.getElementById('platformName').textContent = PLATFORM_NAMES[p];
+      indicator.classList.add('show');
+    } else {
+      indicator.classList.remove('show');
+    }
+  });
+
+  urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') fetchInfo(); });
+
+  function showToast(msg, type = 'error') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast ${type}`;
+  }
+  function clearToast() { document.getElementById('toast').className = 'toast'; }
+
+  async function fetchInfo() {
+    const url = urlInput.value.trim();
+    if (!url) { showToast('Please paste a video URL first.'); return; }
+    clearToast();
+    document.getElementById('preview').classList.remove('show');
+    const btn = document.getElementById('fetchBtn');
+    btn.disabled = true;
+    document.getElementById('fetchBtnText').textContent = 'Fetching...';
+    document.getElementById('fetchSpinner').style.display = 'block';
+    try {
+      const res = await fetch('/api/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Failed to fetch video info.'); return; }
+      videoData = data;
+      renderPreview(data);
+    } catch { showToast('Server not reachable. Make sure the backend is running.'); }
+    finally {
+      btn.disabled = false;
+      document.getElementById('fetchBtnText').textContent = 'Fetch';
+      document.getElementById('fetchSpinner').style.display = 'none';
+    }
+  }
+
+  function renderPreview(data) {
+    document.getElementById('thumbImg').src = data.thumbnail || '';
+    document.getElementById('videoTitle').textContent = data.title;
+    document.getElementById('videoSub').textContent = [data.uploader, data.duration].filter(Boolean).join(' · ');
+    const grid = document.getElementById('formatsGrid');
+    grid.innerHTML = '';
+    data.formats.forEach((fmt, i) => {
+      const id = `fmt_${i}`;
+      const icon = fmt.type === 'audio' ? '🎵' : '🎬';
+      const input = document.createElement('input');
+      input.type = 'radio'; input.name = 'format'; input.id = id; input.className = 'format-opt'; input.value = i;
+      if (i === 0) { input.checked = true; selectedFormat = fmt; }
+      input.addEventListener('change', () => { selectedFormat = fmt; });
+      const label = document.createElement('label');
+      label.htmlFor = id;
+      label.innerHTML = `<span class="format-icon">${icon}</span>${fmt.label}`;
+      grid.appendChild(input); grid.appendChild(label);
+    });
+    selectedFormat = data.formats[0];
+    document.getElementById('preview').classList.add('show');
+    document.getElementById('progressWrap').classList.remove('show');
+  }
+
+  async function startDownload() {
+    if (!videoData || !selectedFormat) return;
+    const btn = document.getElementById('downloadBtn');
+    const progressWrap = document.getElementById('progressWrap');
+    const progressFill = document.getElementById('progressFill');
+    const progressText = document.getElementById('progressText');
+    const spinner = document.getElementById('dlSpinner');
+    const dlBtnText = document.getElementById('dlBtnText');
+
+    btn.disabled = true;
+    btn.querySelector('svg').style.display = 'none';
+    spinner.style.display = 'block';
+    dlBtnText.textContent = 'Downloading...';
+    progressWrap.classList.add('show');
+    progressFill.style.width = '0%';
+    progressText.textContent = 'Sending request to server...';
+    clearToast();
+
+    try {
+      const response = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: urlInput.value.trim(), format_id: selectedFormat.format_id, type: selectedFormat.type })
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: 'Download failed.' }));
+        showToast(err.error || 'Download failed.');
+        progressWrap.classList.remove('show');
+        return;
+      }
+
+      // Use ReadableStream to show real download progress
+      const contentLength = response.headers.get('Content-Length');
+      const total = contentLength ? parseInt(contentLength, 10) : 0;
+
+      progressText.textContent = total
+        ? `Downloading... 0 MB / ${(total / 1024 / 1024).toFixed(1)} MB`
+        : 'Downloading... (calculating size)';
+
+      const reader = response.body.getReader();
+      const chunks = [];
+      let received = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (total) {
+          const pct = Math.round((received / total) * 100);
+          progressFill.style.width = pct + '%';
+          progressText.textContent = `Downloading... ${(received / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB (${pct}%)`;
+        } else {
+          progressFill.style.width = '70%';
+          progressText.textContent = `Downloading... ${(received / 1024 / 1024).toFixed(1)} MB received`;
+        }
+      }
+
+      progressFill.style.width = '100%';
+      progressText.textContent = 'Saving file...';
+
+      // Save the file
+      const blob = new Blob(chunks);
+      const ext = selectedFormat.type === 'audio' ? 'mp3' : 'mp4';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `vidsnatch_${Date.now()}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+
+      showToast('✅ Download complete! File saved to your device.', 'success');
+      setTimeout(() => { progressWrap.classList.remove('show'); }, 3000);
+
+    } catch (e) {
+      showToast('Connection error. Is the server running?');
+      progressWrap.classList.remove('show');
+    } finally {
+      btn.disabled = false;
+      btn.querySelector('svg').style.display = '';
+      spinner.style.display = 'none';
+      dlBtnText.textContent = 'Download';
+    }
+  }
+</script>
+</body>
+</html>
