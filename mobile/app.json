@@ -25,7 +25,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiBaseUrl": "https://YOUR-BACKEND-URL.example.com"
+      "apiBaseUrl": "https://downloader-xeir.onrender.com"
     }
   }
 }
