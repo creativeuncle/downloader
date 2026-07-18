@@ -22,6 +22,7 @@ function detectPlatform(url) {
   if (url.includes('tiktok.com')) return 'tiktok';
   if (url.includes('snapchat.com')) return 'snapchat';
   if (url.includes('twitter.com') || url.includes('x.com')) return 'twitter';
+  if (url.includes('facebook.com') || url.includes('fb.watch')) return 'facebook';
   return 'unknown';
 }
 
@@ -91,7 +92,7 @@ app.post('/api/info', (req, res) => {
 
   const platform = detectPlatform(url);
   if (platform === 'unknown') {
-    return res.status(400).json({ error: 'Only YouTube, Instagram, TikTok, Snapchat, and Twitter/X URLs are supported' });
+    return res.status(400).json({ error: 'Only YouTube, Instagram, TikTok, Snapchat, Twitter/X, and Facebook URLs are supported' });
   }
 
   if (platform === 'snapchat' && !isPublicSnapchat(url)) {
