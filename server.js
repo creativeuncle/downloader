@@ -66,6 +66,16 @@ function cookieArgs() {
   return fs.existsSync(WRITABLE_COOKIES_FILE) ? ['--cookies', WRITABLE_COOKIES_FILE] : [];
 }
 
+// YouTube's "web" client now requires a PO token that cookies alone don't satisfy,
+// triggering "Sign in to confirm you're not a bot" even with valid cookies. The
+// android client skips that check.
+function platformArgs(platform) {
+  if (platform === 'youtube') {
+    return ['--extractor-args', 'youtube:player_client=android,web'];
+  }
+  return [];
+}
+
 // ─── INFO ROUTE ───────────────────────────────────────────────────────────────
 app.post('/api/info', (req, res) => {
   const { url } = req.body;
@@ -85,7 +95,7 @@ app.post('/api/info', (req, res) => {
     });
   }
 
-  const args = ['--dump-json', '--no-playlist', '--no-warnings', ...cookieArgs()];
+  const args = ['--dump-json', '--no-playlist', '--no-warnings', ...cookieArgs(), ...platformArgs(platform)];
 
   args.push(url);
 
@@ -218,6 +228,7 @@ app.post('/api/download', (req, res) => {
     '--postprocessor-args', 'ffmpeg:-movflags +faststart',
     '-o', outputTemplate,
     ...cookieArgs(),
+    ...platformArgs(detectPlatform(url)),
   ];
 
   if (isAudio) {
