@@ -241,10 +241,13 @@ app.post('/api/download', (req, res) => {
   // Apple's Photos framework rejects it outright (PHPhotosErrorDomain 3302)
   // since it only accepts H.264/HEVC video + AAC audio. Force a re-encode to
   // that combination for video downloads so "Save to Photos" always works.
+  // ultrafast + capped resolution keeps this within the ~512MB RAM the free
+  // Render instance has — the default preset was OOM-crashing the process.
   if (!isAudio) {
     args.push(
       '--recode-video', 'mp4',
-      '--postprocessor-args', 'ffmpeg:-c:v libx264 -c:a aac -movflags +faststart'
+      '--postprocessor-args',
+      'ffmpeg:-c:v libx264 -preset ultrafast -crf 26 -vf scale=-2:min(720\\,ih) -c:a aac -b:a 128k -movflags +faststart'
     );
   } else {
     args.push('--postprocessor-args', 'ffmpeg:-movflags +faststart');
