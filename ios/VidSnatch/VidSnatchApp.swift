@@ -5,6 +5,7 @@ struct VidSnatchApp: App {
     var body: some Scene {
         WindowGroup {
             RootTabView()
+                .preferredColorScheme(.light)
         }
     }
 }
