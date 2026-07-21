@@ -16,6 +16,11 @@ struct RootTabView: View {
                 SettingsView()
             }
         }
+        .task {
+            // Ask up front so it's ready before the first download completes,
+            // instead of interrupting the user mid-download.
+            _ = await PhotoSaver.requestPermission()
+        }
     }
 }
 

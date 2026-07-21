@@ -15,6 +15,10 @@
 		1000000000000000000000C5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000B5 /* SettingsView.swift */; };
 		1000000000000000000000C6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000B6 /* Assets.xcassets */; };
 		1000000000000000000000C7 /* QualitySheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000B9 /* QualitySheetView.swift */; };
+		1000000000000000000000C8 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000BB /* APIService.swift */; };
+		1000000000000000000000C9 /* VideoDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000BC /* VideoDownloader.swift */; };
+		1000000000000000000000CA /* PhotoSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000BD /* PhotoSaver.swift */; };
+		1000000000000000000000CB /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000BE /* ShareSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +31,10 @@
 		1000000000000000000000B5 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1000000000000000000000B6 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1000000000000000000000B9 /* QualitySheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QualitySheetView.swift; sourceTree = "<group>"; };
+		1000000000000000000000BB /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
+		1000000000000000000000BC /* VideoDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoDownloader.swift; sourceTree = "<group>"; };
+		1000000000000000000000BD /* PhotoSaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSaver.swift; sourceTree = "<group>"; };
+		1000000000000000000000BE /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,6 +70,9 @@
 				1000000000000000000000B0 /* VidSnatchApp.swift */,
 				1000000000000000000000B1 /* RootTabView.swift */,
 				1000000000000000000000AF /* Views */,
+				1000000000000000000000BA /* Networking */,
+				1000000000000000000000BD /* PhotoSaver.swift */,
+				1000000000000000000000BE /* ShareSheet.swift */,
 				1000000000000000000000B6 /* Assets.xcassets */,
 			);
 			path = VidSnatch;
@@ -77,6 +88,15 @@
 				1000000000000000000000B9 /* QualitySheetView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		1000000000000000000000BA /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				1000000000000000000000BB /* APIService.swift */,
+				1000000000000000000000BC /* VideoDownloader.swift */,
+			);
+			path = Networking;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -155,6 +175,10 @@
 				1000000000000000000000C4 /* ProfileView.swift in Sources */,
 				1000000000000000000000C5 /* SettingsView.swift in Sources */,
 				1000000000000000000000C7 /* QualitySheetView.swift in Sources */,
+				1000000000000000000000C8 /* APIService.swift in Sources */,
+				1000000000000000000000C9 /* VideoDownloader.swift in Sources */,
+				1000000000000000000000CA /* PhotoSaver.swift in Sources */,
+				1000000000000000000000CB /* ShareSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -288,6 +312,7 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Light;
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Allow $(PRODUCT_NAME) to save downloaded videos to your Photos library.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -316,6 +341,7 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Light;
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Allow $(PRODUCT_NAME) to save downloaded videos to your Photos library.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
