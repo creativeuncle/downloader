@@ -137,15 +137,30 @@ struct HomeView: View {
                 downloadProgress = progress
             }
 
+            let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int) ?? 0
+            guard size > 0 else {
+                throw NSError(domain: "VidSnatch", code: -1, userInfo: [NSLocalizedDescriptionKey: "Download came back empty. Try again."])
+            }
+
             if format.type == "audio" {
                 // Photos can't store audio files — hand off to the share sheet instead.
                 shareURL = IdentifiableURL(url: fileURL)
-            } else if await PhotoSaver.requestPermission() {
-                try await PhotoSaver.saveVideo(at: fileURL)
-                successMessage = "Saved to Photos"
-            } else {
-                shareURL = IdentifiableURL(url: fileURL)
+                return
             }
+
+            if await PhotoSaver.requestPermission() {
+                do {
+                    try await PhotoSaver.saveVideo(at: fileURL)
+                    successMessage = "Saved to Photos"
+                    return
+                } catch {
+                    // Photos rejected the file for some reason (corrupt download, unsupported
+                    // container, etc) — don't strand the user with just an error, let them
+                    // grab the file another way.
+                    errorMessage = "Couldn't save to Photos, sharing instead."
+                }
+            }
+            shareURL = IdentifiableURL(url: fileURL)
         } catch {
             errorMessage = error.localizedDescription
         }
