@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeView: View {
     @State private var urlText: String = ""
+    @State private var showQualitySheet = false
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -32,7 +33,8 @@ struct HomeView: View {
 
                             Button {
                                 fieldFocused = false
-                                // download action wired up later
+                                guard !urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                                showQualitySheet = true
                             } label: {
                                 Text("Download")
                                     .font(.system(size: 17, weight: .semibold, design: .rounded))
@@ -49,6 +51,13 @@ struct HomeView: View {
                 .padding(.horizontal, 24)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showQualitySheet) {
+                QualitySheetView { quality in
+                    showQualitySheet = false
+                    // selected quality wired up to the download later
+                    print("Selected quality: \(quality.label)")
+                }
+            }
         }
     }
 }
