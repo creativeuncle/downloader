@@ -231,11 +231,24 @@ app.post('/api/download', (req, res) => {
     '--no-playlist',
     '--no-warnings',
     '--merge-output-format', 'mp4',
-    '--postprocessor-args', 'ffmpeg:-movflags +faststart',
     '-o', outputTemplate,
     ...cookieArgs(detectPlatform(url)),
     ...platformArgs(detectPlatform(url)),
   ];
+
+  // Some sources (Instagram in particular) can serve VP9/Opus streams. Those
+  // remux into a technically-valid .mp4 that most players handle fine, but
+  // Apple's Photos framework rejects it outright (PHPhotosErrorDomain 3302)
+  // since it only accepts H.264/HEVC video + AAC audio. Force a re-encode to
+  // that combination for video downloads so "Save to Photos" always works.
+  if (!isAudio) {
+    args.push(
+      '--recode-video', 'mp4',
+      '--postprocessor-args', 'ffmpeg:-c:v libx264 -c:a aac -movflags +faststart'
+    );
+  } else {
+    args.push('--postprocessor-args', 'ffmpeg:-movflags +faststart');
+  }
 
   if (isAudio) {
     args.push('--extract-audio', '--audio-format', 'mp3');
