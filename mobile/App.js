@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import * as MediaLibrary from 'expo-media-library';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import Constants from 'expo-constants';
 import { useFonts, Kalam_400Regular, Kalam_700Bold } from '@expo-google-fonts/kalam';
 
@@ -80,7 +80,10 @@ export default function App() {
   const [info, setInfo] = useState(null);
 
   useEffect(() => {
-    MediaLibrary.requestPermissionsAsync(true);
+    // writeOnly permission is silently auto-granted on modern Android (scoped
+    // storage), so no dialog shows. Request full access so the OS prompt
+    // actually appears on first launch.
+    MediaLibrary.requestPermissionsAsync();
   }, []);
 
   async function fetchInfo() {
@@ -122,7 +125,7 @@ export default function App() {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      const { status } = await MediaLibrary.requestPermissionsAsync(true);
+      const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status === 'granted') {
         await MediaLibrary.saveToLibraryAsync(fileUri);
       } else if (await Sharing.isAvailableAsync()) {
