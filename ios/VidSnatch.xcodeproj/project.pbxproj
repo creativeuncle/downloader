@@ -14,6 +14,7 @@
 		1000000000000000000000C4 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000B4 /* ProfileView.swift */; };
 		1000000000000000000000C5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000B5 /* SettingsView.swift */; };
 		1000000000000000000000C6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000B6 /* Assets.xcassets */; };
+		1000000000000000000000C7 /* QualitySheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000000B9 /* QualitySheetView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,6 +26,7 @@
 		1000000000000000000000B4 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		1000000000000000000000B5 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1000000000000000000000B6 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1000000000000000000000B9 /* QualitySheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QualitySheetView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +74,7 @@
 				1000000000000000000000B3 /* HistoryView.swift */,
 				1000000000000000000000B4 /* ProfileView.swift */,
 				1000000000000000000000B5 /* SettingsView.swift */,
+				1000000000000000000000B9 /* QualitySheetView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -151,6 +154,7 @@
 				1000000000000000000000C3 /* HistoryView.swift in Sources */,
 				1000000000000000000000C4 /* ProfileView.swift in Sources */,
 				1000000000000000000000C5 /* SettingsView.swift in Sources */,
+				1000000000000000000000C7 /* QualitySheetView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
