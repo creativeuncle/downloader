@@ -24,6 +24,16 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to save downloaded videos to your gallery.",
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save downloaded videos to your gallery.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
+    ],
     "extra": {
       "apiBaseUrl": "https://downloader-xeir.onrender.com"
     }
