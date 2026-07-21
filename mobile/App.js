@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -14,7 +14,9 @@ import {
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
 import Constants from 'expo-constants';
+import { useFonts, Kalam_400Regular, Kalam_700Bold } from '@expo-google-fonts/kalam';
 
 const API_BASE_URL = Constants.expoConfig?.extra?.apiBaseUrl ?? 'https://YOUR-BACKEND-URL.example.com';
 
@@ -27,12 +29,59 @@ function blobToBase64(blob) {
   });
 }
 
+function blobToText(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => resolve(reader.result);
+    reader.readAsText(blob);
+  });
+}
+
+// POST with a JSON body while tracking response download progress —
+// FileSystem.downloadAsync doesn't support a POST body, so this goes
+// through XMLHttpRequest directly.
+function downloadWithProgress(url, body, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.responseType = 'blob';
+    xhr.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress(event.loaded / event.total);
+      }
+    };
+    xhr.onload = async () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.response);
+        return;
+      }
+      try {
+        const text = await blobToText(xhr.response);
+        const data = JSON.parse(text);
+        reject(new Error(data.error || 'Download failed'));
+      } catch {
+        reject(new Error('Download failed'));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.send(JSON.stringify(body));
+  });
+}
+
 export default function App() {
+  const [fontsLoaded] = useFonts({ Kalam_400Regular, Kalam_700Bold });
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [info, setInfo] = useState(null);
+
+  useEffect(() => {
+    MediaLibrary.requestPermissionsAsync(true);
+  }, []);
 
   async function fetchInfo() {
     if (!url.trim()) return;
@@ -58,22 +107,14 @@ export default function App() {
   async function downloadFormat(format) {
     setError('');
     setDownloadingId(format.format_id);
+    setProgress(0);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: url.trim(),
-          format_id: format.format_id,
-          type: format.type,
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Download failed');
-      }
+      const blob = await downloadWithProgress(
+        `${API_BASE_URL}/api/download`,
+        { url: url.trim(), format_id: format.format_id, type: format.type },
+        setProgress
+      );
 
-      const blob = await res.blob();
       const base64 = await blobToBase64(blob);
       const ext = format.type === 'audio' ? 'mp3' : 'mp4';
       const fileUri = `${FileSystem.cacheDirectory}vidsnatch_${Date.now()}.${ext}`;
@@ -81,27 +122,32 @@ export default function App() {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      if (await Sharing.isAvailableAsync()) {
+      const { status } = await MediaLibrary.requestPermissionsAsync(true);
+      if (status === 'granted') {
+        await MediaLibrary.saveToLibraryAsync(fileUri);
+      } else if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri);
       }
     } catch (e) {
       setError(e.message || 'Download failed');
     } finally {
       setDownloadingId(null);
+      setProgress(0);
     }
   }
+
+  if (!fontsLoaded) return null;
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.container}>
-        <Text style={styles.title}>VidSnatch</Text>
-        <Text style={styles.subtitle}>YouTube, Instagram, TikTok, Snapchat, Twitter & Facebook</Text>
+        <Text style={styles.title}>Social Video{'\n'}Downloader</Text>
 
         <TextInput
           style={styles.input}
-          placeholder="Paste a video URL..."
-          placeholderTextColor="#64748b"
+          placeholder="Enter url"
+          placeholderTextColor="#9ca3af"
           value={url}
           onChangeText={setUrl}
           autoCapitalize="none"
@@ -113,9 +159,18 @@ export default function App() {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>Get Video</Text>
+            <Text style={styles.buttonText}>Download</Text>
           )}
         </Pressable>
+
+        {downloadingId && (
+          <View style={styles.progressWrap}>
+            <View style={styles.progressBg}>
+              <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
+            </View>
+            <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
+          </View>
+        )}
 
         {!!error && <Text style={styles.error}>{error}</Text>}
 
@@ -133,11 +188,11 @@ export default function App() {
                 <Pressable
                   style={styles.formatRow}
                   onPress={() => downloadFormat(item)}
-                  disabled={downloadingId === item.format_id}
+                  disabled={!!downloadingId}
                 >
                   <Text style={styles.formatLabel}>{item.label}</Text>
                   {downloadingId === item.format_id ? (
-                    <ActivityIndicator />
+                    <ActivityIndicator color="#111827" />
                   ) : (
                     <Text style={styles.downloadIcon}>⬇</Text>
                   )}
@@ -152,41 +207,61 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#0f172a' },
-  container: { flex: 1, padding: 20, paddingTop: Platform.OS === 'android' ? 30 : 10 },
-  title: { fontSize: 32, fontWeight: '800', color: '#fff', textAlign: 'center' },
-  subtitle: { fontSize: 13, color: '#94a3b8', textAlign: 'center', marginBottom: 20 },
+  safe: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, padding: 24, paddingTop: Platform.OS === 'android' ? 60 : 40 },
+  title: {
+    fontFamily: 'Kalam_700Bold',
+    fontSize: 34,
+    color: '#111827',
+    textAlign: 'center',
+    lineHeight: 40,
+    marginBottom: 32,
+  },
   input: {
-    backgroundColor: '#1e293b',
-    color: '#fff',
+    borderWidth: 2,
+    borderColor: '#111827',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
-    marginBottom: 12,
+    color: '#111827',
+    marginBottom: 16,
   },
   button: {
-    backgroundColor: '#6366f1',
+    backgroundColor: '#111827',
     borderRadius: 12,
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  error: { color: '#f87171', marginTop: 12, textAlign: 'center' },
-  result: { marginTop: 20, flex: 1 },
+  progressWrap: { marginTop: 16 },
+  progressBg: {
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#e5e7eb',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#111827',
+    borderRadius: 5,
+  },
+  progressText: { textAlign: 'center', marginTop: 6, color: '#374151', fontSize: 13 },
+  error: { color: '#dc2626', marginTop: 16, textAlign: 'center' },
+  result: { marginTop: 24, flex: 1 },
   thumb: { width: '100%', height: 200, borderRadius: 12, marginBottom: 10 },
-  videoTitle: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 12 },
+  videoTitle: { color: '#111827', fontSize: 16, fontWeight: '600', marginBottom: 12 },
   formatRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#f3f4f6',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 8,
   },
-  formatLabel: { color: '#e2e8f0', fontSize: 14 },
-  downloadIcon: { color: '#6366f1', fontSize: 18 },
+  formatLabel: { color: '#111827', fontSize: 14 },
+  downloadIcon: { color: '#111827', fontSize: 18 },
 });
