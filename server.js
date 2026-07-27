@@ -89,12 +89,13 @@ const BOT_CHECK_RE = /Sign in to confirm/i;
 // Runs yt-dlp and resolves with its exit code + captured output instead of
 // using callbacks, so routes can await a first attempt and retry with
 // different args before deciding how to respond.
-function runYtDlp(args, timeoutMs) {
+function runYtDlp(args, timeoutMs, onDownloadPercent) {
   return new Promise((resolve) => {
     const proc = spawn('yt-dlp', args);
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let buffer = '';
 
     const timeoutId = setTimeout(() => {
       if (!settled) {
@@ -104,7 +105,21 @@ function runYtDlp(args, timeoutMs) {
       }
     }, timeoutMs);
 
-    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stdout.on('data', d => {
+      const text = d.toString();
+      stdout += text;
+      if (onDownloadPercent) {
+        // --newline makes yt-dlp emit one progress line per update instead of
+        // overwriting with \r, so this is safe to parse line by line.
+        buffer += text;
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          const m = line.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+          if (m) onDownloadPercent(parseFloat(m[1]));
+        }
+      }
+    });
     proc.stderr.on('data', d => { stderr += d.toString(); });
 
     proc.on('close', (code) => {
@@ -112,6 +127,17 @@ function runYtDlp(args, timeoutMs) {
       if (settled) return;
       settled = true;
       resolve({ code, stdout, stderr, timedOut: false });
+    });
+
+    // Without this, a spawn failure (e.g. yt-dlp not on PATH) throws an
+    // unhandled 'error' event and crashes the entire Node process — not just
+    // this one request. Resolve with a non-zero code instead so the route
+    // can respond with an error like any other failure.
+    proc.on('error', (err) => {
+      clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+      resolve({ code: -1, stdout, stderr: stderr + '\n' + err.message, timedOut: false });
     });
   });
 }
@@ -225,9 +251,146 @@ app.post('/api/info', async (req, res) => {
   }
 });
 
-// ─── DOWNLOAD ROUTE ───────────────────────────────────────────────────────────
-// Waits for yt-dlp to finish (needed for ffmpeg merge), then streams file to browser.
-// Content-Length header is set so browser shows real download progress.
+// ─── DOWNLOAD CORE ─────────────────────────────────────────────────────────────
+// Shared by the legacy single-request /api/download and the job-based
+// /api/download/start + SSE progress flow. Fetches the source (yt-dlp),
+// then re-encodes to a Photos/QuickTime-friendly H.264/AAC file (ffmpeg),
+// reporting phase + percent via onProgress as it goes.
+
+function ffprobeDuration(filePath) {
+  return new Promise((resolve) => {
+    const proc = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', filePath]);
+    let out = '';
+    proc.stdout.on('data', d => { out += d.toString(); });
+    proc.on('close', () => {
+      const val = parseFloat(out.trim());
+      resolve(Number.isFinite(val) && val > 0 ? val : 0);
+    });
+    proc.on('error', () => resolve(0));
+  });
+}
+
+function encodeFile(inputFile, outputFile, isAudio, onPercent) {
+  return new Promise(async (resolve, reject) => {
+    const durationSec = await ffprobeDuration(inputFile);
+
+    const args = ['-y', '-i', inputFile];
+    if (isAudio) {
+      args.push('-vn', '-c:a', 'libmp3lame', '-b:a', '192k');
+    } else {
+      // Render sets RENDER=true automatically. Its free instance has ~512MB RAM,
+      // which the default libx264 preset at full resolution OOM-crashes the
+      // whole process — so only cap resolution/speed up there. Local/other
+      // hosts have real CPU/RAM, so keep full quality with a normal preset.
+      if (process.env.RENDER) {
+        args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-vf', 'scale=-2:min(720,ih)');
+      } else {
+        args.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '20');
+      }
+      args.push('-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
+    }
+    args.push('-progress', 'pipe:1', '-nostats', outputFile);
+
+    const proc = spawn('ffmpeg', args);
+    let stderr = '';
+    let buffer = '';
+
+    proc.stdout.on('data', d => {
+      buffer += d.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        const m = line.match(/^out_time=(\d+):(\d+):([\d.]+)/);
+        if (m && durationSec > 0) {
+          const seconds = parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseFloat(m[3]);
+          onPercent(Math.min(99, (seconds / durationSec) * 100));
+        }
+      }
+    });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    proc.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error('Encoding failed. ' + stderr.slice(-300)));
+    });
+    proc.on('error', reject);
+  });
+}
+
+async function performDownload(url, formatId, type, onProgress = () => {}) {
+  const platform = detectPlatform(url);
+  const isAudio = type === 'audio';
+  const jobTag = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const rawTemplate = path.join(TEMP_DIR, `raw_${jobTag}.%(ext)s`);
+  const formatArg = isAudio ? 'bestaudio' : (formatId ? `${formatId}/best` : 'bestvideo+bestaudio/best');
+
+  function buildFetchArgs(clientArgs) {
+    return [
+      '-f', formatArg,
+      '--no-playlist',
+      '--no-warnings',
+      '--newline',
+      '--merge-output-format', 'mp4',
+      '-o', rawTemplate,
+      ...cookieArgs(),
+      ...clientArgs,
+      url,
+    ];
+  }
+
+  onProgress('downloading', 0);
+  let result = await runYtDlp(buildFetchArgs([]), 3600000, (pct) => onProgress('downloading', pct));
+
+  if (platform === 'youtube' && result.code !== 0 && !result.timedOut && BOT_CHECK_RE.test(result.stderr)) {
+    console.log('[YouTube] web client blocked, retrying download with android/tv client');
+    result = await runYtDlp(buildFetchArgs(YOUTUBE_FALLBACK_ARGS), 3600000, (pct) => onProgress('downloading', pct));
+  }
+
+  if (result.timedOut) {
+    throw new Error('Download timed out (60 min). Try a lower quality.');
+  }
+  if (result.code !== 0) {
+    console.error('Download failed:', result.stderr);
+    throw new Error('Download failed. Try a different quality or check the URL.');
+  }
+
+  const rawFiles = fs.readdirSync(TEMP_DIR).filter(f => f.startsWith(`raw_${jobTag}`));
+  if (!rawFiles.length) {
+    throw new Error('Output file not found after download.');
+  }
+  const rawFile = path.join(TEMP_DIR, rawFiles[0]);
+
+  const finalExt = isAudio ? 'mp3' : 'mp4';
+  const finalFile = path.join(TEMP_DIR, `vid_${jobTag}.${finalExt}`);
+
+  onProgress('encoding', 0);
+  try {
+    await encodeFile(rawFile, finalFile, isAudio, (pct) => onProgress('encoding', pct));
+  } finally {
+    fs.unlink(rawFile, () => {});
+  }
+
+  return { filePath: finalFile, fileName: `vidsnatch_${jobTag}.${finalExt}` };
+}
+
+function sendFile(res, filePath, fileName) {
+  const fileSize = fs.statSync(filePath).size;
+  console.log(`[Send] ${filePath} (${(fileSize / 1024 / 1024).toFixed(1)} MB)`);
+
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Length', fileSize);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  const stream = fs.createReadStream(filePath);
+  stream.pipe(res);
+  stream.on('end', () => fs.unlink(filePath, () => {}));
+  stream.on('error', () => fs.unlink(filePath, () => {}));
+}
+
+// ─── LEGACY DOWNLOAD ROUTE ─────────────────────────────────────────────────────
+// Single request/response, used by the mobile (React Native) and iOS apps.
+// No live progress — the client only sees bytes once this responds.
 app.post('/api/download', async (req, res) => {
   const { url, format_id, type } = req.body;
 
@@ -235,97 +398,98 @@ app.post('/api/download', async (req, res) => {
     return res.status(400).json({ error: 'Invalid URL' });
   }
 
-  const platform = detectPlatform(url);
-  const isAudio = type === 'audio';
-  const timestamp = Date.now();
-  // Use %(ext)s so yt-dlp sets the real extension after merge
-  const outputTemplate = path.join(TEMP_DIR, `vid_${timestamp}.%(ext)s`);
+  console.log(`[Download] ${url} | format_id=${format_id || '(default)'} type=${type || 'video'}`);
 
-  let formatArg;
-  if (isAudio) {
-    formatArg = 'bestaudio';
-  } else {
-    // /best as ultimate fallback
-    formatArg = format_id ? `${format_id}/best` : 'bestvideo+bestaudio/best';
+  try {
+    const { filePath, fileName } = await performDownload(url, format_id, type);
+    sendFile(res, filePath, fileName);
+  } catch (err) {
+    const status = /timed out/i.test(err.message) ? 504 : 500;
+    res.status(status).json({ error: err.message });
   }
-
-  function buildArgs(clientArgs) {
-    const args = [
-      '-f', formatArg,
-      '--no-playlist',
-      '--no-warnings',
-      '--merge-output-format', 'mp4',
-      '-o', outputTemplate,
-      ...cookieArgs(),
-      ...clientArgs,
-    ];
-
-    // Some sources (Instagram in particular) can serve VP9/Opus streams. Those
-    // remux into a technically-valid .mp4 that most players handle fine, but
-    // Apple's Photos framework rejects it outright (PHPhotosErrorDomain 3302)
-    // since it only accepts H.264/HEVC video + AAC audio. Force a re-encode to
-    // that combination for video downloads so "Save to Photos" always works.
-    if (!isAudio) {
-      // Render sets RENDER=true automatically. Its free instance has ~512MB RAM,
-      // which the default libx264 preset at full resolution OOM-crashes the
-      // whole process — so only cap resolution/speed up there. Local/other
-      // hosts have real CPU/RAM, so keep full quality with a normal preset.
-      const ffmpegArgs = process.env.RENDER
-        ? '-c:v libx264 -preset ultrafast -crf 26 -vf scale=-2:min(720\\,ih) -c:a aac -b:a 128k -movflags +faststart'
-        : '-c:v libx264 -preset medium -crf 20 -c:a aac -b:a 192k -movflags +faststart';
-      args.push('--recode-video', 'mp4', '--postprocessor-args', `ffmpeg:${ffmpegArgs}`);
-    } else {
-      args.push('--postprocessor-args', 'ffmpeg:-movflags +faststart', '--extract-audio', '--audio-format', 'mp3');
-    }
-
-    args.push(url);
-    return args;
-  }
-
-  console.log(`[Download] ${url} | Format: ${formatArg}`);
-
-  let result = await runYtDlp(buildArgs([]), 3600000);
-
-  if (platform === 'youtube' && result.code !== 0 && !result.timedOut && BOT_CHECK_RE.test(result.stderr)) {
-    console.log('[YouTube] web client blocked, retrying download with android/tv client');
-    result = await runYtDlp(buildArgs(YOUTUBE_FALLBACK_ARGS), 3600000);
-  }
-
-  if (result.timedOut) {
-    console.error('Timeout:', url);
-    return res.status(504).json({ error: 'Download timed out (60 min). Try a lower quality.' });
-  }
-
-  if (result.code !== 0) {
-    console.error('Download failed:', result.stderr);
-    return res.status(500).json({ error: 'Download failed. Try a different quality or check the URL.' });
-  }
-
-  // Find actual output file (extension may differ)
-  const files = fs.readdirSync(TEMP_DIR).filter(f => f.startsWith(`vid_${timestamp}`));
-  if (!files.length) {
-    return res.status(500).json({ error: 'Output file not found after download.' });
-  }
-
-  const actualFile = path.join(TEMP_DIR, files[0]);
-  const actualExt = path.extname(actualFile).slice(1) || (isAudio ? 'mp3' : 'mp4');
-  const fileSize  = fs.statSync(actualFile).size;
-
-  console.log(`[Send] ${actualFile} (${(fileSize / 1024 / 1024).toFixed(1)} MB)`);
-
-  // Content-Length lets browser show real download progress bar
-  res.setHeader('Content-Disposition', `attachment; filename="vidsnatch_${timestamp}.${actualExt}"`);
-  res.setHeader('Content-Type', 'application/octet-stream');
-  res.setHeader('Content-Length', fileSize);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-
-  const stream = fs.createReadStream(actualFile);
-  stream.pipe(res);
-  stream.on('end',   () => fs.unlink(actualFile, () => {}));
-  stream.on('error', () => fs.unlink(actualFile, () => {}));
 });
 
-// Cleanup temp files older than 2 hours
+// ─── JOB-BASED DOWNLOAD + LIVE PROGRESS ────────────────────────────────────────
+// Used by the web UI: start a job, watch its progress over SSE, then fetch the
+// finished file — so the frontend can show a real percentage while yt-dlp is
+// still fetching/encoding, not just once the file starts streaming.
+const jobs = new Map();
+
+app.post('/api/download/start', (req, res) => {
+  const { url, format_id, type } = req.body;
+
+  if (!url || !isValidUrl(url)) {
+    return res.status(400).json({ error: 'Invalid URL' });
+  }
+
+  const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  const job = { status: 'downloading', phase: 'downloading', percent: 0, error: null, filePath: null, fileName: null, createdAt: Date.now() };
+  jobs.set(jobId, job);
+
+  console.log(`[Download] ${url} | format_id=${format_id || '(default)'} type=${type || 'video'} | job=${jobId}`);
+
+  performDownload(url, format_id, type, (phase, percent) => {
+    job.status = phase;
+    job.phase = phase;
+    job.percent = percent;
+  }).then(({ filePath, fileName }) => {
+    job.status = 'done';
+    job.phase = 'done';
+    job.percent = 100;
+    job.filePath = filePath;
+    job.fileName = fileName;
+  }).catch((err) => {
+    job.status = 'error';
+    job.error = err.message || 'Download failed';
+  });
+
+  res.json({ jobId });
+});
+
+app.get('/api/download/progress/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) {
+    return res.status(404).json({ error: 'Unknown job' });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+
+  const send = () => {
+    res.write(`data: ${JSON.stringify({
+      status: job.status,
+      phase: job.phase,
+      percent: Math.round(job.percent || 0),
+      error: job.error,
+    })}\n\n`);
+  };
+
+  send();
+  const interval = setInterval(() => {
+    send();
+    if (job.status === 'done' || job.status === 'error') {
+      clearInterval(interval);
+      res.end();
+    }
+  }, 400);
+
+  req.on('close', () => clearInterval(interval));
+});
+
+app.get('/api/download/file/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job || job.status !== 'done' || !job.filePath) {
+    return res.status(404).json({ error: 'File not ready' });
+  }
+
+  sendFile(res, job.filePath, job.fileName);
+  jobs.delete(req.params.jobId);
+});
+
+// Cleanup temp files older than 2 hours, and stale/abandoned jobs
 setInterval(() => {
   const now = Date.now();
   fs.readdirSync(TEMP_DIR).forEach(file => {
@@ -334,6 +498,9 @@ setInterval(() => {
       if (now - fs.statSync(fp).mtimeMs > 7200000) fs.unlink(fp, () => {});
     } catch {}
   });
+  for (const [jobId, job] of jobs) {
+    if (now - job.createdAt > 7200000) jobs.delete(jobId);
+  }
 }, 3600000);
 
 app.listen(PORT, () => {
