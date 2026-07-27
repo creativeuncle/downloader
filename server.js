@@ -15,14 +15,24 @@ app.use(express.static('public'));
 const TEMP_DIR = path.join(__dirname, 'temp');
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 
-// Detect platform from URL
+// Detect platform from URL's hostname (not a raw substring match — "x.com" as
+// a substring would false-positive on unrelated domains like netflix.com).
 function detectPlatform(url) {
-  if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
-  if (url.includes('instagram.com')) return 'instagram';
-  if (url.includes('tiktok.com')) return 'tiktok';
-  if (url.includes('snapchat.com')) return 'snapchat';
-  if (url.includes('twitter.com') || url.includes('x.com')) return 'twitter';
-  if (url.includes('facebook.com') || url.includes('fb.watch')) return 'facebook';
+  let hostname;
+  try {
+    hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return 'unknown';
+  }
+
+  const isHost = (...domains) => domains.some(d => hostname === d || hostname.endsWith('.' + d));
+
+  if (isHost('youtube.com', 'youtu.be')) return 'youtube';
+  if (isHost('instagram.com')) return 'instagram';
+  if (isHost('tiktok.com')) return 'tiktok';
+  if (isHost('snapchat.com')) return 'snapchat';
+  if (isHost('twitter.com', 'x.com')) return 'twitter';
+  if (isHost('facebook.com', 'fb.watch')) return 'facebook';
   return 'unknown';
 }
 
