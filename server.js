@@ -63,27 +63,51 @@ if (fs.existsSync(SOURCE_COOKIES_FILE)) {
 } else {
   console.log(`[Cookies] No cookies file found at ${SOURCE_COOKIES_FILE} — running without cookies`);
 }
-// YouTube's android/tv clients don't use web cookies at all — attaching a
-// web-session cookie jar to those requests is a mismatched signal that can
-// itself trigger the bot check, so cookies are skipped for YouTube.
-function cookieArgs(platform) {
-  if (platform === 'youtube') return [];
+
+function cookieArgs() {
   return fs.existsSync(WRITABLE_COOKIES_FILE) ? ['--cookies', WRITABLE_COOKIES_FILE] : [];
 }
 
-// YouTube's "web" client requires a PO token that cookies alone don't satisfy,
-// triggering "Sign in to confirm you're not a bot". Mixing web into the client
-// list re-triggers that same failure, so use android/tv only — neither needs a
-// PO token or cookies.
-function platformArgs(platform) {
-  if (platform === 'youtube') {
-    return ['--extractor-args', 'youtube:player_client=android,tv'];
-  }
-  return [];
+// YouTube's "web" client (used with cookies) sometimes gets blocked with
+// "Sign in to confirm you're not a bot" — usually an IP-reputation thing
+// (common on cloud/datacenter hosts, rare on a home connection). The
+// android/tv clients skip that check entirely but only expose a limited
+// format list, so this is used as a fallback, not the default.
+const YOUTUBE_FALLBACK_ARGS = ['--extractor-args', 'youtube:player_client=android,tv'];
+const BOT_CHECK_RE = /Sign in to confirm/i;
+
+// Runs yt-dlp and resolves with its exit code + captured output instead of
+// using callbacks, so routes can await a first attempt and retry with
+// different args before deciding how to respond.
+function runYtDlp(args, timeoutMs) {
+  return new Promise((resolve) => {
+    const proc = spawn('yt-dlp', args);
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        proc.kill('SIGKILL');
+        resolve({ code: null, stdout, stderr, timedOut: true });
+      }
+    }, timeoutMs);
+
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    proc.on('close', (code) => {
+      clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+      resolve({ code, stdout, stderr, timedOut: false });
+    });
+  });
 }
 
 // ─── INFO ROUTE ───────────────────────────────────────────────────────────────
-app.post('/api/info', (req, res) => {
+app.post('/api/info', async (req, res) => {
   const { url } = req.body;
 
   if (!url || !isValidUrl(url)) {
@@ -101,118 +125,107 @@ app.post('/api/info', (req, res) => {
     });
   }
 
-  const args = ['--dump-json', '--no-playlist', '--no-warnings', ...cookieArgs(platform), ...platformArgs(platform)];
+  let result = await runYtDlp(['--dump-json', '--no-playlist', '--no-warnings', ...cookieArgs(), url], 60000);
 
-  args.push(url);
+  if (platform === 'youtube' && result.code !== 0 && !result.timedOut && BOT_CHECK_RE.test(result.stderr)) {
+    console.log('[YouTube] web client blocked, retrying with android/tv client');
+    result = await runYtDlp(
+      ['--dump-json', '--no-playlist', '--no-warnings', ...YOUTUBE_FALLBACK_ARGS, url],
+      60000
+    );
+  }
 
-  const proc = spawn('yt-dlp', args);
-  let stdout = '';
-  let stderr = '';
-  let responded = false;
+  if (result.timedOut) {
+    return res.status(504).json({ error: 'Timed out fetching video info. Please try again.' });
+  }
 
-  const timeoutId = setTimeout(() => {
-    if (!responded) {
-      responded = true;
-      proc.kill('SIGKILL');
-      res.status(504).json({ error: 'Timed out fetching video info. Please try again.' });
+  if (result.code !== 0) {
+    console.error('yt-dlp info error:', result.stderr);
+    if (platform === 'snapchat') {
+      return res.status(500).json({ error: 'Could not fetch Snapchat video. Make sure it is a public Spotlight or Story link.' });
     }
-  }, 60000);
+    return res.status(500).json({ error: 'Could not fetch video info. Check the URL and try again.' });
+  }
 
-  proc.stdout.on('data', d => { stdout += d.toString(); });
-  proc.stderr.on('data', d => { stderr += d.toString(); });
+  try {
+    const info = JSON.parse(result.stdout);
+    const formats = [];
 
-  proc.on('close', (code) => {
-    clearTimeout(timeoutId);
-    if (responded) return;
-    responded = true;
+    // Collect all video streams, sort by quality score
+    const videoStreams = (info.formats || []).filter(f => f.vcodec && f.vcodec !== 'none');
 
-    if (code !== 0) {
-      console.error('yt-dlp info error:', stderr);
-      if (platform === 'snapchat') {
-        return res.status(500).json({ error: 'Could not fetch Snapchat video. Make sure it is a public Spotlight or Story link.' });
+    const sorted = [...videoStreams].sort((a, b) => {
+      const aScore = (a.height || 0) * 10000 + (a.tbr || 0);
+      const bScore = (b.height || 0) * 10000 + (b.tbr || 0);
+      return bScore - aScore;
+    });
+
+    // Deduplicate by height (or bitrate bucket for HLS)
+    const seen = new Set();
+    const unique = [];
+    sorted.forEach(f => {
+      const key = f.height || Math.round((f.tbr || 0) / 200);
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        unique.push(f);
       }
-      return res.status(500).json({ error: 'Could not fetch video info. Check the URL and try again.' });
+    });
+
+    // Always put "Best Quality Auto" first — most reliable
+    formats.push({
+      label: '🔥 Best Quality (Auto)',
+      format_id: 'bestvideo+bestaudio/best',
+      type: 'video'
+    });
+
+    // Add detected quality options
+    unique.slice(0, 5).forEach((f, idx) => {
+      const height = f.height;
+      const label = height
+        ? (height >= 2160 ? `4K (${height}p) MP4` : `${height}p MP4`)
+        : (idx === 0 ? 'Best Quality MP4' : `Quality ${idx + 1} MP4`);
+      const badge = height >= 2160 ? '🔥 ' : height >= 1080 ? '⚡ ' : '';
+
+      // video-only streams need +bestaudio; progressive streams (with audio) use as-is
+      const hasAudio = f.acodec && f.acodec !== 'none';
+      const fmtSelector = hasAudio ? f.format_id : `${f.format_id}+bestaudio`;
+
+      formats.push({ label: badge + label, format_id: fmtSelector, type: 'video' });
+    });
+
+    // Fallback options if no streams detected
+    if (unique.length === 0) {
+      formats.push({ label: '⚡ 1080p MP4', format_id: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', type: 'video' });
+      formats.push({ label: '720p MP4',  format_id: 'bestvideo[height<=720]+bestaudio/best[height<=720]',   type: 'video' });
+      formats.push({ label: '480p MP4',  format_id: 'bestvideo[height<=480]+bestaudio/best[height<=480]',   type: 'video' });
     }
 
-    try {
-      const info = JSON.parse(stdout);
-      const formats = [];
+    formats.push({ label: '🎵 Audio Only (MP3)', format_id: 'bestaudio', type: 'audio' });
 
-      // Collect all video streams, sort by quality score
-      const videoStreams = (info.formats || []).filter(f => f.vcodec && f.vcodec !== 'none');
-
-      const sorted = [...videoStreams].sort((a, b) => {
-        const aScore = (a.height || 0) * 10000 + (a.tbr || 0);
-        const bScore = (b.height || 0) * 10000 + (b.tbr || 0);
-        return bScore - aScore;
-      });
-
-      // Deduplicate by height (or bitrate bucket for HLS)
-      const seen = new Set();
-      const unique = [];
-      sorted.forEach(f => {
-        const key = f.height || Math.round((f.tbr || 0) / 200);
-        if (key && !seen.has(key)) {
-          seen.add(key);
-          unique.push(f);
-        }
-      });
-
-      // Always put "Best Quality Auto" first — most reliable
-      formats.push({
-        label: '🔥 Best Quality (Auto)',
-        format_id: 'bestvideo+bestaudio/best',
-        type: 'video'
-      });
-
-      // Add detected quality options
-      unique.slice(0, 5).forEach((f, idx) => {
-        const height = f.height;
-        const label = height
-          ? (height >= 2160 ? `4K (${height}p) MP4` : `${height}p MP4`)
-          : (idx === 0 ? 'Best Quality MP4' : `Quality ${idx + 1} MP4`);
-        const badge = height >= 2160 ? '🔥 ' : height >= 1080 ? '⚡ ' : '';
-
-        // video-only streams need +bestaudio; progressive streams (with audio) use as-is
-        const hasAudio = f.acodec && f.acodec !== 'none';
-        const fmtSelector = hasAudio ? f.format_id : `${f.format_id}+bestaudio`;
-
-        formats.push({ label: badge + label, format_id: fmtSelector, type: 'video' });
-      });
-
-      // Fallback options if no streams detected
-      if (unique.length === 0) {
-        formats.push({ label: '⚡ 1080p MP4', format_id: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', type: 'video' });
-        formats.push({ label: '720p MP4',  format_id: 'bestvideo[height<=720]+bestaudio/best[height<=720]',   type: 'video' });
-        formats.push({ label: '480p MP4',  format_id: 'bestvideo[height<=480]+bestaudio/best[height<=480]',   type: 'video' });
-      }
-
-      formats.push({ label: '🎵 Audio Only (MP3)', format_id: 'bestaudio', type: 'audio' });
-
-      res.json({
-        title: info.title || 'Video',
-        thumbnail: info.thumbnail || '',
-        duration: info.duration_string || '',
-        platform,
-        uploader: info.uploader || info.channel || '',
-        formats
-      });
-    } catch (e) {
-      res.status(500).json({ error: 'Failed to parse video information.' });
-    }
-  });
+    res.json({
+      title: info.title || 'Video',
+      thumbnail: info.thumbnail || '',
+      duration: info.duration_string || '',
+      platform,
+      uploader: info.uploader || info.channel || '',
+      formats
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to parse video information.' });
+  }
 });
 
 // ─── DOWNLOAD ROUTE ───────────────────────────────────────────────────────────
 // Waits for yt-dlp to finish (needed for ffmpeg merge), then streams file to browser.
 // Content-Length header is set so browser shows real download progress.
-app.post('/api/download', (req, res) => {
+app.post('/api/download', async (req, res) => {
   const { url, format_id, type } = req.body;
 
   if (!url || !isValidUrl(url)) {
     return res.status(400).json({ error: 'Invalid URL' });
   }
 
+  const platform = detectPlatform(url);
   const isAudio = type === 'audio';
   const timestamp = Date.now();
   // Use %(ext)s so yt-dlp sets the real extension after merge
@@ -226,95 +239,79 @@ app.post('/api/download', (req, res) => {
     formatArg = format_id ? `${format_id}/best` : 'bestvideo+bestaudio/best';
   }
 
-  const args = [
-    '-f', formatArg,
-    '--no-playlist',
-    '--no-warnings',
-    '--merge-output-format', 'mp4',
-    '-o', outputTemplate,
-    ...cookieArgs(detectPlatform(url)),
-    ...platformArgs(detectPlatform(url)),
-  ];
+  function buildArgs(clientArgs) {
+    const args = [
+      '-f', formatArg,
+      '--no-playlist',
+      '--no-warnings',
+      '--merge-output-format', 'mp4',
+      '-o', outputTemplate,
+      ...cookieArgs(),
+      ...clientArgs,
+    ];
 
-  // Some sources (Instagram in particular) can serve VP9/Opus streams. Those
-  // remux into a technically-valid .mp4 that most players handle fine, but
-  // Apple's Photos framework rejects it outright (PHPhotosErrorDomain 3302)
-  // since it only accepts H.264/HEVC video + AAC audio. Force a re-encode to
-  // that combination for video downloads so "Save to Photos" always works.
-  // ultrafast + capped resolution keeps this within the ~512MB RAM the free
-  // Render instance has — the default preset was OOM-crashing the process.
-  if (!isAudio) {
-    args.push(
-      '--recode-video', 'mp4',
-      '--postprocessor-args',
-      'ffmpeg:-c:v libx264 -preset ultrafast -crf 26 -vf scale=-2:min(720\\,ih) -c:a aac -b:a 128k -movflags +faststart'
-    );
-  } else {
-    args.push('--postprocessor-args', 'ffmpeg:-movflags +faststart');
+    // Some sources (Instagram in particular) can serve VP9/Opus streams. Those
+    // remux into a technically-valid .mp4 that most players handle fine, but
+    // Apple's Photos framework rejects it outright (PHPhotosErrorDomain 3302)
+    // since it only accepts H.264/HEVC video + AAC audio. Force a re-encode to
+    // that combination for video downloads so "Save to Photos" always works.
+    // ultrafast + capped resolution keeps this within the ~512MB RAM the free
+    // Render instance has — the default preset was OOM-crashing the process.
+    if (!isAudio) {
+      args.push(
+        '--recode-video', 'mp4',
+        '--postprocessor-args',
+        'ffmpeg:-c:v libx264 -preset ultrafast -crf 26 -vf scale=-2:min(720\\,ih) -c:a aac -b:a 128k -movflags +faststart'
+      );
+    } else {
+      args.push('--postprocessor-args', 'ffmpeg:-movflags +faststart', '--extract-audio', '--audio-format', 'mp3');
+    }
+
+    args.push(url);
+    return args;
   }
-
-  if (isAudio) {
-    args.push('--extract-audio', '--audio-format', 'mp3');
-  }
-
-  args.push(url);
 
   console.log(`[Download] ${url} | Format: ${formatArg}`);
 
-  const proc = spawn('yt-dlp', args);
-  let stderr = '';
-  let responded = false;
+  let result = await runYtDlp(buildArgs([]), 3600000);
 
-  // 60 minute timeout — enough for large 4K videos plus re-encode time
-  const timeoutId = setTimeout(() => {
-    if (!responded) {
-      responded = true;
-      proc.kill('SIGKILL');
-      console.error('Timeout:', url);
-      if (!res.headersSent) {
-        res.status(504).json({ error: 'Download timed out (60 min). Try a lower quality.' });
-      }
-    }
-  }, 3600000);
+  if (platform === 'youtube' && result.code !== 0 && !result.timedOut && BOT_CHECK_RE.test(result.stderr)) {
+    console.log('[YouTube] web client blocked, retrying download with android/tv client');
+    result = await runYtDlp(buildArgs(YOUTUBE_FALLBACK_ARGS), 3600000);
+  }
 
-  proc.stderr.on('data', d => { stderr += d.toString(); });
+  if (result.timedOut) {
+    console.error('Timeout:', url);
+    return res.status(504).json({ error: 'Download timed out (60 min). Try a lower quality.' });
+  }
 
-  proc.on('close', (code) => {
-    clearTimeout(timeoutId);
-    if (responded) return;
-    responded = true;
+  if (result.code !== 0) {
+    console.error('Download failed:', result.stderr);
+    return res.status(500).json({ error: 'Download failed. Try a different quality or check the URL.' });
+  }
 
-    if (code !== 0) {
-      console.error('Download failed:', stderr);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Download failed. Try a different quality or check the URL.' });
-      }
-      return;
-    }
+  // Find actual output file (extension may differ)
+  const files = fs.readdirSync(TEMP_DIR).filter(f => f.startsWith(`vid_${timestamp}`));
+  if (!files.length) {
+    return res.status(500).json({ error: 'Output file not found after download.' });
+  }
 
-    // Find actual output file (extension may differ)
-    const files = fs.readdirSync(TEMP_DIR).filter(f => f.startsWith(`vid_${timestamp}`));
-    if (!files.length) {
-      return res.status(500).json({ error: 'Output file not found after download.' });
-    }
+  const actualFile = path.join(TEMP_DIR, files[0]);
+  const actualExt = path.extname(actualFile).slice(1) || (isAudio ? 'mp3' : 'mp4');
+  const fileSize  = fs.statSync(actualFile).size;
 
-    const actualFile = path.join(TEMP_DIR, files[0]);
-    const actualExt = path.extname(actualFile).slice(1) || (isAudio ? 'mp3' : 'mp4');
-    const fileSize  = fs.statSync(actualFile).size;
+  console.log(`[Send] ${actualFile} (${(fileSize / 1024 / 1024).toFixed(1)} MB)`);
 
-    console.log(`[Send] ${actualFile} (${(fileSize / 1024 / 1024).toFixed(1)} MB)`);
+  // Content-Length lets browser show real download progress bar
+  res.setHeader('Content-Disposition', `attachment; filename="vidsnatch_${timestamp}.${actualExt}"`);
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Length', fileSize);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 
-    // Content-Length lets browser show real download progress bar
-    res.setHeader('Content-Disposition', `attachment; filename="vidsnatch_${timestamp}.${actualExt}"`);
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Length', fileSize);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-
-    const stream = fs.createReadStream(actualFile);
-    stream.pipe(res);
-    stream.on('end',   () => fs.unlink(actualFile, () => {}));
-    stream.on('error', () => fs.unlink(actualFile, () => {}));
-  });
+  const stream = fs.createReadStream(actualFile);
+  stream.pipe(res);
+  stream.on('end',   () => fs.unlink(actualFile, () => {}));
+  stream.on('error', () => fs.unlink(actualFile, () => {}));
 });
 
 // Cleanup temp files older than 2 hours
