@@ -265,17 +265,17 @@ app.post('/api/download', (req, res) => {
   let stderr = '';
   let responded = false;
 
-  // 10 minute timeout — enough for large 4K videos
+  // 60 minute timeout — enough for large 4K videos plus re-encode time
   const timeoutId = setTimeout(() => {
     if (!responded) {
       responded = true;
       proc.kill('SIGKILL');
       console.error('Timeout:', url);
       if (!res.headersSent) {
-        res.status(504).json({ error: 'Download timed out (10 min). Try a lower quality.' });
+        res.status(504).json({ error: 'Download timed out (60 min). Try a lower quality.' });
       }
     }
-  }, 600000);
+  }, 3600000);
 
   proc.stderr.on('data', d => { stderr += d.toString(); });
 
