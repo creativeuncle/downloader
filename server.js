@@ -317,7 +317,13 @@ function encodeFile(inputFile, outputFile, isAudio, onPercent) {
   });
 }
 
-async function performDownload(url, formatId, type, onProgress = () => {}) {
+async function performDownload(url, formatId, type, onProgress = () => {}, options = {}) {
+  // Re-encoding to H.264/AAC is only needed so iOS's Photos framework will
+  // accept the file (see PHPhotosErrorDomain 3302 above) — the mobile/iOS
+  // apps need it, but a browser/desktop download doesn't, so skip it there
+  // to save real time. Audio still always gets converted since "MP3" is
+  // what's promised in the UI, not whatever codec the source served.
+  const { encode = true } = options;
   const platform = detectPlatform(url);
   const isAudio = type === 'audio';
   const jobTag = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -359,6 +365,14 @@ async function performDownload(url, formatId, type, onProgress = () => {}) {
     throw new Error('Output file not found after download.');
   }
   const rawFile = path.join(TEMP_DIR, rawFiles[0]);
+
+  if (!isAudio && !encode) {
+    const rawExt = path.extname(rawFile).slice(1) || 'mp4';
+    const finalFile = path.join(TEMP_DIR, `vid_${jobTag}.${rawExt}`);
+    fs.renameSync(rawFile, finalFile);
+    onProgress('done', 100);
+    return { filePath: finalFile, fileName: `vidsnatch_${jobTag}.${rawExt}` };
+  }
 
   const finalExt = isAudio ? 'mp3' : 'mp4';
   const finalFile = path.join(TEMP_DIR, `vid_${jobTag}.${finalExt}`);
@@ -432,7 +446,7 @@ app.post('/api/download/start', (req, res) => {
     job.status = phase;
     job.phase = phase;
     job.percent = percent;
-  }).then(({ filePath, fileName }) => {
+  }, { encode: false }).then(({ filePath, fileName }) => {
     job.status = 'done';
     job.phase = 'done';
     job.percent = 100;
